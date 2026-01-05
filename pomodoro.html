@@ -1,0 +1,511 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>POMODORO OS</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <!-- Use latest lucide-react -->
+    <script crossorigin src="https://unpkg.com/lucide-react@latest/dist/umd/lucide-react.min.js"></script>
+    <script crossorigin src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'JetBrains Mono', monospace;
+            background-color: white;
+        }
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+    </style>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: { mono: ['JetBrains Mono', 'monospace'] },
+                    keyframes: {
+                        "fade-in": { "0%": { opacity: "0" }, "100%": { opacity: "1" } },
+                        "slide-in-from-bottom-2": { "0%": { transform: "translateY(0.5rem)" }, "100%": { transform: "translateY(0)" } }
+                    },
+                    animation: { "in": "fade-in 0.2s ease-out, slide-in-from-bottom-2 0.2s ease-out" }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-white min-h-screen">
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useMemo, useRef, createContext, useContext } = React;
+        const { createRoot } = ReactDOM;
+
+        // Error Boundary
+        class ErrorBoundary extends React.Component {
+            constructor(props) {
+                super(props);
+                this.state = { hasError: false, error: null };
+            }
+
+            static getDerivedStateFromError(error) {
+                return { hasError: true, error };
+            }
+
+            componentDidCatch(error, errorInfo) {
+                console.error("ErrorBoundary caught an error", error, errorInfo);
+            }
+
+            render() {
+                if (this.state.hasError) {
+                    return <div className="p-4 text-red-600 font-mono border-2 border-red-600 m-4">
+                        <h1 className="font-bold">Something went wrong.</h1>
+                        <pre className="text-xs mt-2 whitespace-pre-wrap">{this.state.error && this.state.error.toString()}</pre>
+                    </div>;
+                }
+
+                return this.props.children;
+            }
+        }
+
+        // Icon Handling
+        let LucideIcons = {};
+        if (typeof LucideReact !== 'undefined') {
+            // Try different export patterns
+            if (LucideReact.icons) {
+                LucideIcons = LucideReact.icons;
+            } else {
+                LucideIcons = LucideReact;
+            }
+        } else {
+            console.error("LucideReact is undefined");
+        }
+
+        const getIcon = (name) => {
+            const Icon = LucideIcons[name];
+            if (!Icon) {
+                // Return a placeholder SVG
+                return (props) => (
+                    <svg {...props} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <circle cx="12" cy="12" r="10" />
+                        <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />
+                        <path d="M12 17h.01" />
+                    </svg>
+                );
+            }
+            return Icon;
+        };
+
+        // --- Utility Functions ---
+        function cn(...classes) {
+            return classes.filter(Boolean).join(' ');
+        }
+
+        // --- Components ---
+        const Button = React.forwardRef(({ className, variant = "default", size = "default", asChild = false, ...props }, ref) => {
+            const baseStyles = "inline-flex items-center justify-center rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50";
+            const variants = {
+                default: "bg-black text-white hover:bg-black/90",
+                ghost: "hover:bg-gray-100 hover:text-black",
+            };
+            const sizes = {
+                default: "h-8 px-2 py-2",
+                icon: "h-10 w-10",
+            };
+
+            return (
+                <button
+                    className={cn(baseStyles, variants[variant], sizes[size], className)}
+                    ref={ref}
+                    {...props}
+                />
+            );
+        });
+        Button.displayName = "Button";
+
+        const Input = React.forwardRef(({ className, ...props }, ref) => (
+            <input
+                className={cn("flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50", className)}
+                ref={ref}
+                {...props}
+            />
+        ));
+        Input.displayName = "Input";
+
+        const Textarea = React.forwardRef(({ className, ...props }, ref) => (
+            <textarea
+                className={cn("flex min-h-[80px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50", className)}
+                ref={ref}
+                {...props}
+            />
+        ));
+        Textarea.displayName = "Textarea";
+
+        // Tabs
+        const TabsContext = createContext({});
+        const Tabs = ({ value, onValueChange, children, className }) => (
+            <TabsContext.Provider value={{ value, onValueChange }}>
+                <div className={className}>{children}</div>
+            </TabsContext.Provider>
+        );
+        const TabsList = ({ children, className }) => <div className={className}>{children}</div>;
+        const TabsTrigger = ({ value, children, className }) => {
+            const { value: selectedValue, onValueChange } = useContext(TabsContext);
+            const isActive = selectedValue === value;
+            return (
+                <button onClick={() => onValueChange(value)} className={className} data-state={isActive ? 'active' : 'inactive'}>
+                    {children}
+                </button>
+            );
+        };
+        const TabsContent = ({ value, children, className }) => {
+            const { value: selectedValue } = useContext(TabsContext);
+            if (selectedValue !== value) return null;
+            return <div className={className}>{children}</div>;
+        };
+
+        // Select
+        const SelectContext = createContext({});
+        const Select = ({ value, onValueChange, children }) => {
+            const [open, setOpen] = useState(false);
+            const containerRef = useRef(null);
+            useEffect(() => {
+                const handleClickOutside = (event) => {
+                    if (containerRef.current && !containerRef.current.contains(event.target)) setOpen(false);
+                };
+                document.addEventListener("mousedown", handleClickOutside);
+                return () => document.removeEventListener("mousedown", handleClickOutside);
+            }, []);
+            return (
+                <SelectContext.Provider value={{ value, onValueChange, open, setOpen }}>
+                    <div className="relative" ref={containerRef}>{children}</div>
+                </SelectContext.Provider>
+            );
+        };
+        const SelectTrigger = ({ children, className }) => {
+            const { setOpen, open } = useContext(SelectContext);
+            return <div onClick={() => setOpen(!open)} className={cn("cursor-pointer", className)}>{children}</div>;
+        };
+        const SelectContent = ({ children, className }) => {
+            const { open } = useContext(SelectContext);
+            if (!open) return null;
+            return <div className={cn("absolute top-full left-0 w-full shadow-lg border border-black z-50", className)}>{children}</div>;
+        };
+        const SelectItem = ({ value, children, className }) => {
+            const { onValueChange, setOpen } = useContext(SelectContext);
+            return (
+                <div onClick={(e) => { e.stopPropagation(); onValueChange(value); setOpen(false); }} className={className}>
+                    {children}
+                </div>
+            );
+        };
+
+        // Hourglass
+        const HourglassIcon = getIcon('Hourglass');
+        const Hourglass = ({ isRunning, onClick, className }) => (
+            <button onClick={onClick} className={cn("group relative flex items-center justify-center hover:bg-gray-50 transition-colors", className)}>
+                <HourglassIcon className={cn("w-6 h-6 text-black transition-all", isRunning && "animate-spin")} style={isRunning ? { animationDuration: '3s' } : {}} />
+                <span className="absolute -bottom-8 left-1/2 -translate-x-1/2 bg-black text-white text-[10px] font-bold px-2 py-1 opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none uppercase tracking-widest z-50">
+                    {isRunning ? 'Finish' : 'Start'}
+                </span>
+            </button>
+        );
+
+        // App
+        const Folder = getIcon('Folder');
+        const Trash2 = getIcon('Trash2');
+        const Plus = getIcon('Plus');
+        const InfinityIcon = getIcon('Infinity');
+        const LayoutGrid = getIcon('LayoutGrid');
+
+        const DEFAULT_PROJECTS = [
+            { id: 1, name: 'Administrative', icon: 'Briefcase' },
+            { id: 2, name: 'Doggo Walking', icon: 'Dog' },
+            { id: 3, name: 'Graphic Design', icon: 'Palette' },
+            { id: 4, name: 'Space Science Lab', icon: 'Rocket' },
+            { id: 5, name: 'Exercise', icon: 'Dumbbell' },
+            { id: 6, name: 'Writing', icon: 'PenTool' },
+            { id: 7, name: 'Gaming', icon: 'Gamepad2' }
+        ];
+
+        const POMODORO_DURATION = 25 * 60;
+
+        const TomatoIcon = ({ className }) => (
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
+                <path d="M12 5c-5.5 0-10 3.6-10 8 0 4.4 4.5 8 10 8s10-3.6 10-8c0-4.4-4.5-8-10-8z" />
+                <path d="M12 5V2" />
+                <path d="M12 5c0 0 1-2 4-3" />
+                <path d="M12 5c0 0-1-2-4-3" />
+            </svg>
+        );
+
+        function App() {
+            const [activeTab, setActiveTab] = useState('timer');
+            const [projects, setProjects] = useState(DEFAULT_PROJECTS);
+            const [selectedProject, setSelectedProject] = useState('Gaming');
+            const [newProjectName, setNewProjectName] = useState('');
+            const [newProjectIcon, setNewProjectIcon] = useState('Folder');
+            const [notes, setNotes] = useState('');
+            const [sessionType, setSessionType] = useState('pomodoro');
+            const [isRunning, setIsRunning] = useState(false);
+            const [timeLeft, setTimeLeft] = useState(POMODORO_DURATION);
+            const [sessionStartTime, setSessionStartTime] = useState(null);
+            const [logs, setLogs] = useState([]);
+            const [notification, setNotification] = useState(null);
+
+            const formatTime = seconds => {
+                const mins = Math.floor(seconds / 60);
+                const secs = seconds % 60;
+                return `${mins}:${secs.toString().padStart(2, '0')}`;
+            };
+
+            useEffect(() => {
+                // Restoration logic omitted for brevity/safety, just use defaults if localstorage fails
+                try {
+                    // Projects
+                    const savedProjects = localStorage.getItem('pomodoroProjects');
+                    if (savedProjects) setProjects(JSON.parse(savedProjects));
+
+                    // Logs
+                    const savedLogs = localStorage.getItem('pomodoroLogs');
+                    if (savedLogs) setLogs(JSON.parse(savedLogs));
+                } catch(e) { console.error(e); }
+            }, []);
+
+            useEffect(() => {
+                let interval = null;
+                if (isRunning) {
+                    interval = setInterval(() => {
+                        setTimeLeft(prev => {
+                             if (sessionType === 'pomodoro') return prev > 0 ? prev - 1 : 0;
+                             return prev + 1;
+                        });
+                    }, 1000);
+                }
+                return () => clearInterval(interval);
+            }, [isRunning, sessionType]);
+
+            useEffect(() => {
+                if (isRunning && sessionType === 'pomodoro' && timeLeft === 0) {
+                    handleTimerComplete();
+                }
+            }, [timeLeft, isRunning, sessionType]);
+
+            const showNotification = (message) => {
+                setNotification(message);
+                setTimeout(() => setNotification(null), 3000);
+            };
+
+            const handleTimerComplete = () => {
+                setIsRunning(false);
+                saveLog();
+                setTimeLeft(sessionType === 'pomodoro' ? POMODORO_DURATION : 0);
+                setSessionStartTime(null);
+                showNotification("SESSION COMPLETE");
+            };
+
+            const handleHourglassClick = () => {
+                if (isRunning) handleTimerComplete();
+                else {
+                    if (!sessionStartTime) setSessionStartTime(new Date());
+                    setIsRunning(true);
+                }
+            };
+
+            const saveLog = () => {
+                if (!sessionStartTime) return;
+                const durationSecs = sessionType === 'infinite' ? timeLeft : (POMODORO_DURATION - timeLeft);
+                if (durationSecs < 10) return;
+
+                const newLog = {
+                    id: Date.now(),
+                    project: selectedProject,
+                    type: sessionType === 'pomodoro' ? 'Pomodoro session' : 'Infinite session',
+                    startTime: sessionStartTime.toLocaleTimeString(),
+                    duration: formatTime(durationSecs),
+                    date: new Date().toLocaleDateString(),
+                    timestamp: Date.now(),
+                    notes: notes
+                };
+                const updatedLogs = [newLog, ...logs];
+                setLogs(updatedLogs);
+                localStorage.setItem('pomodoroLogs', JSON.stringify(updatedLogs));
+                setNotes('');
+            };
+
+            const deleteLog = (id) => {
+                const updated = logs.filter(l => l.id !== id);
+                setLogs(updated);
+                localStorage.setItem('pomodoroLogs', JSON.stringify(updated));
+            };
+
+            const addProject = () => {
+                if(!newProjectName.trim()) return;
+                const newP = { id: Date.now(), name: newProjectName, icon: newProjectIcon };
+                const updated = [...projects, newP];
+                setProjects(updated);
+                localStorage.setItem('pomodoroProjects', JSON.stringify(updated));
+                setNewProjectName('');
+            };
+
+            const deleteProject = (id) => {
+                const updated = projects.filter(p => p.id !== id);
+                setProjects(updated);
+                localStorage.setItem('pomodoroProjects', JSON.stringify(updated));
+            };
+
+            // Helpers
+            const currentProjectObj = projects.find(p => p.name === selectedProject) || projects[0] || {};
+            const CurrentProjectIcon = getIcon(currentProjectObj.icon);
+
+            // Group logs by date
+            const groupedLogs = logs.reduce((acc, log) => {
+                if (!acc[log.date]) acc[log.date] = [];
+                acc[log.date].push(log);
+                return acc;
+            }, {});
+
+            const totalFocusTime = logs.reduce((total, log) => {
+                 const [mins] = log.duration.split(':');
+                 return total + parseInt(mins || 0);
+            }, 0);
+
+            return (
+                <div className="min-h-screen bg-white text-black flex items-center justify-center p-4 font-mono overflow-hidden">
+                    <div className="w-full max-w-lg border-4 border-black bg-white shadow-none flex flex-col h-[600px]">
+                        <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full flex flex-col h-full">
+                            <TabsList className="grid w-full grid-cols-3 bg-transparent p-0 gap-0 border-b-2 border-black rounded-none shrink-0 h-14">
+                                {['timer', 'logs', 'projects'].map(tab => (
+                                    <TabsTrigger key={tab} value={tab} className={cn("h-full rounded-none border-black -mb-[2px] text-sm font-bold uppercase tracking-wider transition-all data-[state=active]:bg-black data-[state=active]:text-white data-[state=inactive]:hover:bg-gray-50", tab !== 'projects' && "border-r-2")}>
+                                        {tab}
+                                    </TabsTrigger>
+                                ))}
+                            </TabsList>
+
+                            <div className="flex-1 overflow-hidden relative bg-white">
+                                <TabsContent value="timer" className="h-full flex flex-col mt-0">
+                                    <div className="p-6 flex flex-col h-full gap-4">
+                                        <div className="border-2 border-black p-3 shrink-0">
+                                            <label className="block text-[10px] font-bold uppercase tracking-widest mb-2 text-gray-500">Target Protocol</label>
+                                            <Select value={selectedProject} onValueChange={setSelectedProject}>
+                                                <SelectTrigger className="w-full h-10 border-2 border-black rounded-none bg-white hover:bg-gray-50 px-3 py-2 flex items-center justify-between">
+                                                    <div className="flex items-center gap-3">
+                                                        <div className="p-1 bg-black text-white"><CurrentProjectIcon className="w-3 h-3" /></div>
+                                                        <span className="font-bold text-sm uppercase tracking-tight truncate">{currentProjectObj.name}</span>
+                                                    </div>
+                                                </SelectTrigger>
+                                                <SelectContent className="bg-white max-h-[300px] overflow-y-auto">
+                                                    {projects.map(p => {
+                                                        const PIcon = getIcon(p.icon);
+                                                        return (
+                                                            <SelectItem key={p.id} value={p.name} className="hover:bg-gray-100 p-2 flex items-center gap-2 cursor-pointer border-b last:border-0 border-gray-100">
+                                                                <PIcon className="w-4 h-4" /> <span className="font-bold">{p.name}</span>
+                                                            </SelectItem>
+                                                        );
+                                                    })}
+                                                </SelectContent>
+                                            </Select>
+                                        </div>
+
+                                        <div className="border-2 border-black p-3 shrink-0">
+                                            <label className="block text-[10px] font-bold uppercase tracking-widest mb-2 text-gray-500">Session Data</label>
+                                            <Textarea value={notes} onChange={e => setNotes(e.target.value)} className="w-full border-2 border-black rounded-none resize-none min-h-[60px] text-xs shadow-none placeholder:text-gray-400" placeholder="[INSERT NOTES]" />
+                                        </div>
+
+                                        <div className="border-2 border-black flex items-center shrink-0 h-14 mt-4">
+                                            <Hourglass isRunning={isRunning} onClick={handleHourglassClick} className="w-14 h-full border-r-2 border-black" />
+                                            <Button onClick={() => { if(isRunning) handleTimerComplete(); setSessionType('pomodoro'); setIsRunning(false); setTimeLeft(POMODORO_DURATION); setSessionStartTime(null); }} variant="ghost" className={cn("rounded-none w-14 h-full border-r-2 border-black p-0", sessionType === 'pomodoro' ? "bg-black text-white" : "")} title="Pomodoro Mode">
+                                                <TomatoIcon className="w-6 h-6" />
+                                            </Button>
+                                            <Button onClick={() => { if(isRunning) handleTimerComplete(); setSessionType('infinite'); setIsRunning(false); setTimeLeft(0); setSessionStartTime(null); }} variant="ghost" className={cn("rounded-none w-14 h-full border-r-2 border-black p-0", sessionType === 'infinite' ? "bg-black text-white" : "")} title="Infinite Mode">
+                                                <InfinityIcon className="w-6 h-6" />
+                                            </Button>
+                                            <div className="flex-1 flex items-center justify-center font-mono font-bold text-3xl tracking-widest">{formatTime(timeLeft)}</div>
+                                        </div>
+
+                                        <div className="text-center h-8 shrink-0 flex items-center justify-center overflow-hidden mb-4 mt-auto">
+                                            {notification && <span className="text-xs font-bold uppercase tracking-widest bg-black text-white px-3 py-1 animate-in fade-in slide-in-from-bottom-2 duration-300">{notification}</span>}
+                                        </div>
+                                    </div>
+                                </TabsContent>
+
+                                <TabsContent value="projects" className="h-full overflow-y-auto p-6 space-y-6 mt-0 bg-white absolute inset-0 no-scrollbar">
+                                    <div className="border-b-4 border-black pb-4">
+                                        <h2 className="text-3xl font-bold uppercase tracking-tighter">Project Database</h2>
+                                    </div>
+                                    <div className="flex flex-col gap-2 border-2 border-black p-4 bg-gray-50">
+                                        <label className="text-xs font-bold uppercase tracking-widest text-gray-500">New Project Entry</label>
+                                        <div className="flex gap-2">
+                                             <Select value={newProjectIcon} onValueChange={setNewProjectIcon}>
+                                                <SelectTrigger className="w-[80px] h-12 rounded-none border-2 border-black bg-white flex items-center justify-center">
+                                                    {(() => { const Icon = getIcon(newProjectIcon); return <Icon className="w-5 h-5" />; })()}
+                                                </SelectTrigger>
+                                                <SelectContent className="bg-white max-h-[300px] overflow-y-auto border-2 border-black">
+                                                    <div className="grid grid-cols-5 gap-1 p-2">
+                                                        {Object.keys(LucideIcons).slice(0, 50).map((name) => {
+                                                            const Icon = getIcon(name);
+                                                            return (
+                                                                <div key={name} onClick={(e) => { e.stopPropagation(); setNewProjectIcon(name); }} className={cn("p-2 cursor-pointer hover:bg-gray-100 flex justify-center items-center border border-transparent", newProjectIcon === name && "bg-black text-white")} title={name}>
+                                                                    <Icon className="w-5 h-5" />
+                                                                </div>
+                                                            );
+                                                        })}
+                                                    </div>
+                                                </SelectContent>
+                                            </Select>
+                                            <Input placeholder="DESIGNATION..." value={newProjectName} onChange={e => setNewProjectName(e.target.value)} className="rounded-none border-2 border-black uppercase h-12 text-lg font-bold flex-1" />
+                                            <Button onClick={addProject} className="rounded-none bg-black text-white w-16 h-12 border-2 border-black"><Plus className="w-6 h-6" /></Button>
+                                        </div>
+                                    </div>
+                                    <div className="space-y-3">
+                                        {projects.map(p => {
+                                            const Icon = getIcon(p.icon);
+                                            const isActive = p.name === selectedProject;
+                                            return (
+                                                <div key={p.id} className={cn("flex items-center justify-between p-4 border-2 cursor-pointer", isActive ? "border-black bg-black text-white" : "border-gray-200 hover:border-black text-black bg-white")} onClick={() => setSelectedProject(p.name)}>
+                                                    <div className="flex items-center gap-4"><Icon className="w-5 h-5" /><span className="font-bold uppercase">{p.name}</span></div>
+                                                    <Button variant="ghost" size="icon" onClick={e => { e.stopPropagation(); deleteProject(p.id); }} className={cn("h-8 w-8 rounded-none", isActive ? "text-white" : "text-red-600")}><Trash2 className="w-4 h-4" /></Button>
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                </TabsContent>
+
+                                <TabsContent value="logs" className="h-full overflow-y-auto p-6 space-y-6 mt-0 bg-white absolute inset-0 no-scrollbar">
+                                    <div className="border-b-4 border-black pb-4"><h2 className="text-3xl font-bold uppercase">Session Logs</h2><p className="text-xs uppercase mt-1 text-gray-500">Total Focus: {totalFocusTime} MIN</p></div>
+                                    {Object.entries(groupedLogs).map(([date, dateLogs]) => (
+                                        <div key={date}>
+                                            <div className="flex items-center gap-4 mb-4"><div className="h-0.5 bg-black flex-1"></div><span className="text-xs font-bold uppercase bg-black text-white px-3 py-1">{date}</span><div className="h-0.5 bg-black flex-1"></div></div>
+                                            <div className="space-y-3">
+                                                {dateLogs.map(log => {
+                                                    const project = projects.find(p => p.name === log.project);
+                                                    const Icon = project ? getIcon(project.icon) : Folder;
+                                                    return (
+                                                        <div key={log.id} className="border-2 border-black p-4 bg-white relative group hover:bg-gray-50">
+                                                            <Button variant="ghost" size="icon" onClick={e => { e.stopPropagation(); deleteLog(log.id); }} className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 hover:text-red-600"><Trash2 className="w-4 h-4" /></Button>
+                                                            <div className="flex justify-between items-start mb-2 pr-8">
+                                                                <div className="flex items-center gap-3"><Icon className="w-4 h-4" /><span className="font-bold uppercase text-sm">{log.project}</span></div>
+                                                                <span className="text-lg font-mono font-bold bg-black text-white px-2">{log.duration}</span>
+                                                            </div>
+                                                            <div className="flex justify-between items-center text-xs font-bold text-gray-500 uppercase"><div>{log.startTime}</div></div>
+                                                            {log.notes && <div className="text-xs text-gray-600 border-t border-gray-100 pt-2 font-sans italic">"{log.notes}"</div>}
+                                                        </div>
+                                                    );
+                                                })}
+                                            </div>
+                                        </div>
+                                    ))}
+                                    {logs.length === 0 && <div className="text-center py-16 border-2 border-dashed border-gray-300"><LayoutGrid className="w-16 h-16 mx-auto mb-4 text-gray-300" /><p className="font-bold text-gray-400 uppercase">No Data Recorded</p></div>}
+                                </TabsContent>
+                            </div>
+                        </Tabs>
+                    </div>
+                </div>
+            );
+        }
+
+        const root = createRoot(document.getElementById('root'));
+        root.render(<ErrorBoundary><App /></ErrorBoundary>);
+    </script>
+</body>
+</html>
