@@ -1,0 +1,478 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Pomodoro Timer</title>
+
+  <!-- React and ReactDOM -->
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+
+  <!-- Babel for JSX -->
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+
+  <!-- Lucide React -->
+  <script src="https://unpkg.com/lucide-react@latest/dist/umd/lucide-react.min.js"></script>
+
+  <!-- Google Fonts: JetBrains Mono -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+
+  <style>
+    body {
+      font-family: 'JetBrains Mono', monospace;
+      background-color: #f3f4f6;
+    }
+    .retro-border {
+      border: 4px solid black;
+      box-shadow: 6px 6px 0px 0px rgba(0,0,0,1);
+    }
+    .retro-border-sm {
+      border: 2px solid black;
+      box-shadow: 3px 3px 0px 0px rgba(0,0,0,1);
+    }
+    .no-scrollbar::-webkit-scrollbar {
+      display: none;
+    }
+    .no-scrollbar {
+      -ms-overflow-style: none;
+      scrollbar-width: none;
+    }
+  </style>
+</head>
+<body class="min-h-screen flex items-center justify-center p-4">
+  <div id="root" class="w-full max-w-md"></div>
+
+  <script type="text/babel">
+    const { useState, useEffect, useRef } = React;
+
+    // Safe Icon Component wrapper
+    const Icon = ({ name, size = 24, ...props }) => {
+      if (!window.LucideReact) return null;
+      const Component = window.LucideReact[name] || window.LucideReact.HelpCircle || window.LucideReact.AlertCircle;
+      if (!Component) return <span style={{fontSize: size}}>?</span>;
+      return <Component size={size} {...props} />;
+    };
+
+    // List of available icons for projects
+    const ICON_NAMES = [
+      'Briefcase', 'Code', 'Coffee', 'Book', 'Dumbbell', 'Music', 'Gamepad2',
+      'Phone', 'Home', 'ShoppingCart', 'Plane', 'Car', 'Star', 'Heart', 'Zap',
+      'PenTool', 'GraduationCap', 'Laptop', 'Utensils', 'Smile', 'Sun', 'Moon',
+      'Umbrella', 'Camera', 'Video', 'Mic', 'Headphones', 'Speaker', 'Bell'
+    ];
+
+    function PomodoroTimer() {
+      // State
+      const [minutes, setMinutes] = useState(25);
+      const [seconds, setSeconds] = useState(0);
+      const [isActive, setIsActive] = useState(false);
+      const [mode, setMode] = useState('pomodoro'); // 'pomodoro' | 'break'
+      const [isFreeTimer, setIsFreeTimer] = useState(false);
+      const [activeTab, setActiveTab] = useState('timer'); // 'timer' | 'projects' | 'logs'
+
+      const [projects, setProjects] = useState(() => {
+        const saved = localStorage.getItem('pomodoroProjects');
+        return saved ? JSON.parse(saved) : [
+          { id: 1, name: 'Work', icon: 'Briefcase' },
+          { id: 2, name: 'Study', icon: 'Book' },
+          { id: 3, name: 'Exercise', icon: 'Dumbbell' },
+          { id: 4, name: 'Code', icon: 'Code' },
+        ];
+      });
+
+      const [selectedProject, setSelectedProject] = useState(() => {
+        const saved = localStorage.getItem('pomodoroSelectedProject');
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          const exists = projects.find(p => p.id === parsed.id);
+          return exists || projects[0];
+        }
+        return projects[0];
+      });
+
+      const [logs, setLogs] = useState(() => {
+        const saved = localStorage.getItem('pomodoroLogs');
+        return saved ? JSON.parse(saved) : [];
+      });
+
+      const [sessionStartTime, setSessionStartTime] = useState(null);
+      const [sessionDescription, setSessionDescription] = useState('');
+
+      // New Project State
+      const [newProjectName, setNewProjectName] = useState('');
+      const [newProjectIcon, setNewProjectIcon] = useState('Code');
+
+      // Persistence
+      useEffect(() => {
+        localStorage.setItem('pomodoroProjects', JSON.stringify(projects));
+      }, [projects]);
+
+      useEffect(() => {
+        localStorage.setItem('pomodoroSelectedProject', JSON.stringify(selectedProject));
+      }, [selectedProject]);
+
+      useEffect(() => {
+        localStorage.setItem('pomodoroLogs', JSON.stringify(logs));
+      }, [logs]);
+
+      // Timer Logic
+      useEffect(() => {
+        let interval = null;
+        if (isActive) {
+          interval = setInterval(() => {
+            if (isFreeTimer) {
+              if (seconds === 59) {
+                setMinutes(m => m + 1);
+                setSeconds(0);
+              } else {
+                setSeconds(s => s + 1);
+              }
+            } else {
+              if (minutes === 0 && seconds === 0) {
+                handleSessionComplete(true);
+              } else if (seconds === 0) {
+                setMinutes(m => m - 1);
+                setSeconds(59);
+              } else {
+                setSeconds(s => s - 1);
+              }
+            }
+          }, 1000);
+        }
+        return () => clearInterval(interval);
+      }, [isActive, minutes, seconds, isFreeTimer]);
+
+      const handleSessionComplete = (completed = true) => {
+        setIsActive(false);
+        const audio = new Audio('https://actions.google.com/sounds/v1/alarms/beep_short.ogg');
+        audio.play().catch(e => console.log('Audio play failed', e));
+
+        if ((mode === 'pomodoro' || isFreeTimer) && sessionStartTime) {
+          const endTime = new Date();
+          const durationSeconds = Math.floor((endTime - sessionStartTime) / 1000);
+          const durationMinutes = Math.floor(durationSeconds / 60);
+
+          if (durationSeconds > 60 || isFreeTimer) { // Log if > 1 min or free timer
+             const newLog = {
+              id: Date.now(),
+              projectName: selectedProject.name,
+              projectIcon: selectedProject.icon,
+              description: sessionDescription || (isFreeTimer ? 'Flow Session' : 'Pomodoro'),
+              durationMinutes: durationMinutes,
+              totalSeconds: durationSeconds,
+              date: endTime.toLocaleDateString(),
+              timestamp: endTime.getTime(),
+              completed: completed,
+              type: isFreeTimer ? 'free' : 'pomodoro'
+            };
+            setLogs(prev => [newLog, ...prev]);
+          }
+          setSessionDescription('');
+        }
+        setSessionStartTime(null);
+        if (!isFreeTimer) resetTimer();
+      };
+
+      const toggleTimer = () => {
+        if (!isActive && !sessionStartTime) {
+          setSessionStartTime(new Date());
+        }
+        setIsActive(!isActive);
+      };
+
+      const stopTimer = () => {
+        if (isActive || sessionStartTime) {
+          handleSessionComplete(false);
+        }
+        resetTimer();
+      };
+
+      const resetTimer = () => {
+        setIsActive(false);
+        setSessionStartTime(null);
+        if (isFreeTimer) {
+          setMinutes(0);
+          setSeconds(0);
+        } else {
+          setMinutes(25);
+          setSeconds(0);
+        }
+      };
+
+      const toggleFreeTimer = () => {
+        setIsFreeTimer(!isFreeTimer);
+        setIsActive(false);
+        setSessionStartTime(null);
+        setMinutes(isFreeTimer ? 0 : 25);
+        setSeconds(0);
+      };
+
+      // Project Management
+      const addProject = () => {
+        if (!newProjectName.trim()) return;
+        const newProj = {
+          id: Date.now(),
+          name: newProjectName.trim(),
+          icon: newProjectIcon
+        };
+        setProjects([...projects, newProj]);
+        setNewProjectName('');
+      };
+
+      const deleteProject = (id) => {
+        if (projects.length <= 1) return; // Prevent deleting last project
+        const newProjects = projects.filter(p => p.id !== id);
+        setProjects(newProjects);
+        if (selectedProject.id === id) {
+          setSelectedProject(newProjects[0]);
+        }
+      };
+
+      // Streak Calculation
+      const getStreak = () => {
+        if (logs.length === 0) return 0;
+
+        // Get unique dates sorted descending
+        const uniqueDates = [...new Set(logs.map(log => new Date(log.timestamp).setHours(0,0,0,0)))].sort((a,b) => b - a);
+
+        const today = new Date().setHours(0,0,0,0);
+        const yesterday = today - 86400000;
+
+        let streak = 0;
+
+        // If the most recent log is today or yesterday, we start counting
+        let currentCheck;
+        if (uniqueDates.includes(today)) {
+            currentCheck = today;
+        } else if (uniqueDates.includes(yesterday)) {
+            currentCheck = yesterday;
+        } else {
+            return 0;
+        }
+
+        for (let date of uniqueDates) {
+          if (date === currentCheck) {
+            streak++;
+            currentCheck -= 86400000; // Go to previous day
+          } else if (date < currentCheck) {
+             break;
+          }
+        }
+        return streak;
+      };
+
+      // Helpers
+      const formatTime = (m, s) => `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+
+      return (
+        <div className="bg-white retro-border p-6 flex flex-col gap-6 relative">
+
+          {/* Header / Tabs */}
+          <div className="flex gap-2 border-b-4 border-black pb-4 overflow-x-auto no-scrollbar">
+            {['timer', 'projects', 'logs'].map(tab => (
+              <button
+                key={tab}
+                onClick={() => setActiveTab(tab)}
+                className={`px-4 py-2 font-bold uppercase transition-all ${
+                  activeTab === tab
+                    ? 'bg-black text-white'
+                    : 'bg-white text-black hover:bg-gray-100'
+                } border-2 border-black`}
+              >
+                {tab}
+              </button>
+            ))}
+          </div>
+
+          {/* TIMER TAB */}
+          {activeTab === 'timer' && (
+            <div className="flex flex-col items-center gap-6 py-4">
+              {/* Project Selector */}
+              <div className="flex items-center gap-3 bg-gray-100 px-4 py-2 border-2 border-black w-full justify-between">
+                <div className="flex items-center gap-2">
+                   <Icon name={selectedProject.icon} size={20} />
+                   <span className="font-bold">{selectedProject.name}</span>
+                </div>
+                <select
+                  className="bg-transparent font-bold outline-none text-right cursor-pointer w-full"
+                  value={selectedProject.id}
+                  onChange={(e) => setSelectedProject(projects.find(p => p.id === parseInt(e.target.value)))}
+                >
+                  {projects.map(p => (
+                    <option key={p.id} value={p.id}>{p.name}</option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Timer Display */}
+              <div className="relative w-full aspect-square max-w-[280px] flex items-center justify-center border-4 border-black bg-white">
+                <div className="text-6xl font-bold tracking-tighter">
+                   {formatTime(minutes, seconds)}
+                </div>
+                {isFreeTimer && (
+                  <div className="absolute top-2 right-2">
+                    <Icon name="Infinity" size={24} />
+                  </div>
+                )}
+              </div>
+
+              {/* Session Note */}
+              <input
+                type="text"
+                placeholder="What are you working on?"
+                value={sessionDescription}
+                onChange={(e) => setSessionDescription(e.target.value)}
+                className="w-full border-b-2 border-black p-2 outline-none font-bold bg-transparent placeholder-gray-500 text-center"
+              />
+
+              {/* Controls */}
+              <div className="flex gap-4 w-full">
+                <button
+                  onClick={toggleTimer}
+                  className={`flex-1 py-4 border-4 border-black font-bold text-xl flex items-center justify-center gap-2 transition-transform active:translate-y-1 ${isActive ? 'bg-white' : 'bg-black text-white'}`}
+                >
+                  <Icon name={isActive ? "Pause" : "Play"} />
+                  {isActive ? 'PAUSE' : 'START'}
+                </button>
+
+                {(isActive || minutes !== (isFreeTimer ? 0 : 25) || seconds !== 0) && (
+                   <button
+                    onClick={stopTimer}
+                    className="w-16 border-4 border-black flex items-center justify-center hover:bg-red-500 hover:text-white transition-colors"
+                  >
+                    <Icon name="Square" size={20} fill="currentColor" />
+                  </button>
+                )}
+              </div>
+
+              <button
+                onClick={toggleFreeTimer}
+                className="text-xs font-bold underline decoration-2 hover:text-gray-600"
+              >
+                {isFreeTimer ? 'SWITCH TO POMODORO' : 'SWITCH TO FREE FLOW'}
+              </button>
+            </div>
+          )}
+
+          {/* PROJECTS TAB */}
+          {activeTab === 'projects' && (
+            <div className="flex flex-col gap-4 h-[400px]">
+              <div className="flex-1 overflow-y-auto pr-2 space-y-3 no-scrollbar">
+                {projects.map(project => {
+                  return (
+                    <div key={project.id} className="flex items-center justify-between p-3 border-2 border-black bg-white">
+                      <div className="flex items-center gap-3">
+                        <div className="p-2 bg-gray-100 border border-black">
+                          <Icon name={project.icon} size={18} />
+                        </div>
+                        <span className="font-bold">{project.name}</span>
+                      </div>
+                      {projects.length > 1 && (
+                        <button onClick={() => deleteProject(project.id)} className="p-2 hover:bg-red-100 transition-colors">
+                          <Icon name="Trash2" size={16} />
+                        </button>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+
+              <div className="border-t-4 border-black pt-4 flex flex-col gap-3">
+                <div className="font-bold">NEW PROJECT</div>
+                <input
+                  value={newProjectName}
+                  onChange={(e) => setNewProjectName(e.target.value)}
+                  className="w-full border-2 border-black p-2 font-bold outline-none"
+                  placeholder="Project Name"
+                />
+
+                <div className="flex gap-2 overflow-x-auto pb-2 no-scrollbar">
+                  {ICON_NAMES.map(iconName => {
+                    return (
+                      <button
+                        key={iconName}
+                        onClick={() => setNewProjectIcon(iconName)}
+                        className={`p-2 border-2 border-black min-w-[40px] flex items-center justify-center ${newProjectIcon === iconName ? 'bg-black text-white' : 'bg-white'}`}
+                      >
+                        <Icon name={iconName} size={16} />
+                      </button>
+                    )
+                  })}
+                </div>
+
+                <button
+                  onClick={addProject}
+                  className="w-full bg-black text-white font-bold py-3 border-2 border-black hover:bg-gray-800"
+                >
+                  ADD PROJECT
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* LOGS TAB */}
+          {activeTab === 'logs' && (
+            <div className="flex flex-col gap-4 h-[400px]">
+               {/* Streak Header */}
+               <div className="flex items-center justify-between p-4 border-4 border-black bg-yellow-400">
+                  <div className="flex flex-col">
+                    <span className="text-xs font-bold">CURRENT STREAK</span>
+                    <span className="text-3xl font-bold">{getStreak()} DAYS</span>
+                  </div>
+                  <Icon name="Flame" size={32} strokeWidth={2.5} />
+               </div>
+
+               <div className="flex-1 overflow-y-auto space-y-2 no-scrollbar pr-1">
+                 {logs.length === 0 ? (
+                   <div className="text-center py-10 text-gray-400 font-bold">NO LOGS YET</div>
+                 ) : (
+                   logs.map(log => {
+                     return (
+                       <div key={log.id} className="border-2 border-black p-3 bg-white flex items-center gap-3">
+                         <div className="p-2 bg-gray-100 border border-black shrink-0">
+                           <Icon name={log.projectIcon} size={16} />
+                         </div>
+                         <div className="flex-1 min-w-0">
+                           <div className="flex justify-between items-baseline">
+                             <span className="font-bold truncate">{log.projectName}</span>
+                             <span className="text-xs font-bold text-gray-500">{log.date}</span>
+                           </div>
+                           <div className="text-xs truncate">{log.description}</div>
+                         </div>
+                         <div className="font-bold whitespace-nowrap bg-black text-white px-2 py-1 text-xs">
+                           {log.durationMinutes}m
+                         </div>
+                       </div>
+                     );
+                   })
+                 )}
+               </div>
+
+               {logs.length > 0 && (
+                 <button
+                   onClick={() => {
+                     if(confirm('Clear all logs?')) setLogs([]);
+                   }}
+                   className="text-xs text-center underline font-bold text-red-500 hover:text-red-700"
+                 >
+                   CLEAR HISTORY
+                 </button>
+               )}
+            </div>
+          )}
+
+        </div>
+      );
+    }
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<PomodoroTimer />);
+  </script>
+</body>
+</html>
