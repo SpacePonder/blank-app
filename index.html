@@ -1,0 +1,30 @@
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Byte Duel: Tactical Data War</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="ui-container">
+    <header id="ui-header">
+      <div class="stats">INTEGRITY: <span id="pIntegrity">0</span> BITS</div>
+      <div class="weapon-indicators">
+        <div id="wep1" class="weapon-indicator active-weapon">[1] MGUN</div>
+        <div id="wep2" class="weapon-indicator">[2] BOMB</div>
+        <div id="wep3" class="weapon-indicator">[3] SHIELD</div>
+      </div>
+      <div id="score">SCORE: 0</div>
+      <div class="stats" style="color: #ff0000;">REMOTE PROCESS: <span id="eIntegrity">0</span></div>
+    </header>
+    <div id="canvas-wrapper">
+      <canvas id="gameCanvas" width="900" height="500"></canvas>
+      <div id="game-over">
+        <h1 id="status-text">STRING NULLIFIED</h1>
+        <p id="sub-text">Connection Lost.</p>
+        <button onclick="location.reload()">RE-INSTANTIATE</button>
+      </div>
+    </div>
+  </div>
+  <script src="game.js"></script>
+</body>
+</html>
